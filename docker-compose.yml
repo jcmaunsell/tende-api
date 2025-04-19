@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/tende
+      - DD_AGENT_HOST=dd-agent
+      - DD_TRACE_AGENT_URL=http://dd-agent:8126
+      - DD_ENV=development
+      - DD_SERVICE=tende-api
+      - DD_VERSION=1.0.0
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_SITE=datadoghq.com
+    volumes:
+      - ./uploads:/app/uploads
+      - ./logs:/var/log/tende-api
+    depends_on:
+      db:
+        condition: service_healthy
+      dd-agent:
+        condition: service_healthy
+    networks:
+      - datadog
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=tende
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - datadog
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dd-agent:
+    image: datadog/agent:latest
+    environment:
+      - DD_API_KEY=${DD_API_KEY}
+      - DD_APM_ENABLED=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true
+      - DD_LOGS_ENABLED=true
+      - DD_HOSTNAME=tende-api-agent
+      - DD_CONTAINER_EXCLUDE=name:dd-agent
+      - DD_CONTAINER_INCLUDE=name:tende-api
+      - DD_TAGS=env:development service:tende-api
+    ports:
+      - "8126:8126"  # APM
+      - "8125:8125/udp"  # DogStatsD
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - datadog
+    healthcheck:
+      test: ["CMD", "agent", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 2
+      start_period: 5s
+
+networks:
+  datadog:
+    driver: bridge
+
+volumes:
+  postgres_data:
